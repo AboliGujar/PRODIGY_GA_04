@@ -1,0 +1,156 @@
+Task 4:
+Implement an image-to-image translation model using a conditional generative adversarial network (cGAN) called pix2pix. 
+
+
+Solution:
+
+ What is Pix2Pix?
+Pix2Pix uses:
+
+A U-Net generator to translate images.
+
+A PatchGAN discriminator to classify whether image patches are real or fake.
+
+A combined loss: adversarial + L1 loss.
+
+Typical applications:
+
+Sketch to photo
+
+Black-and-white to color
+
+Aerial to map
+
+⚙️ Implementation: Pix2Pix (PyTorch)
+📦 Step 1: Install Required Packages
+bash
+Copy
+Edit
+pip install torch torchvision matplotlib
+🖼️ Step 2: Load a Dataset (e.g., edges2shoes or facades)
+python
+Copy
+Edit
+from torchvision.datasets import ImageFolder
+from torchvision import transforms
+from torch.utils.data import DataLoader
+import os
+
+transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.ToTensor(),
+])
+
+# Assume paired data (input|target) in a single image split in the middle
+class PairedImageDataset(torch.utils.data.Dataset):
+    def __init__(self, root_dir, transform=None):
+        self.files = os.listdir(root_dir)
+        self.root_dir = root_dir
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.root_dir, self.files[idx])
+        image = transforms.ToPILImage()(plt.imread(img_path))
+        w, h = image.size
+        input_img = image.crop((0, 0, w//2, h))
+        target_img = image.crop((w//2, 0, w, h))
+        if self.transform:
+            input_img = self.transform(input_img)
+            target_img = self.transform(target_img)
+        return input_img, target_img
+🏗️ Step 3: Define Generator (U-Net)
+python
+Copy
+Edit
+import torch.nn as nn
+
+class UNetGenerator(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, 64, 4, stride=2, padding=1),  # downsample
+            nn.LeakyReLU(0.2, inplace=True),
+            # add more layers here...
+        )
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(64, 3, 4, stride=2, padding=1),  # upsample
+            nn.Tanh()
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+🧪 Step 4: Define Discriminator (PatchGAN)
+python
+Copy
+Edit
+class PatchDiscriminator(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(6, 64, 4, stride=2, padding=1),  # input + target
+            nn.LeakyReLU(0.2),
+            # add more layers here...
+            nn.Conv2d(64, 1, 4, padding=1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, input_image, target_image):
+        x = torch.cat([input_image, target_image], dim=1)
+        return self.model(x)
+🔧 Step 5: Training Loop
+python
+Copy
+Edit
+def train(generator, discriminator, dataloader, num_epochs, device):
+    criterion_GAN = nn.BCELoss()
+    criterion_L1 = nn.L1Loss()
+
+    optimizer_G = torch.optim.Adam(generator.parameters(), lr=2e-4, betas=(0.5, 0.999))
+    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=2e-4, betas=(0.5, 0.999))
+
+    for epoch in range(num_epochs):
+        for input_img, target_img in dataloader:
+            input_img = input_img.to(device)
+            target_img = target_img.to(device)
+
+            real_labels = torch.ones((input_img.size(0), 1, 30, 30), device=device)
+            fake_labels = torch.zeros_like(real_labels)
+
+            # Train Generator
+            optimizer_G.zero_grad()
+            fake_output = generator(input_img)
+            pred_fake = discriminator(input_img, fake_output)
+            loss_GAN = criterion_GAN(pred_fake, real_labels)
+            loss_L1 = criterion_L1(fake_output, target_img) * 100
+            loss_G = loss_GAN + loss_L1
+            loss_G.backward()
+            optimizer_G.step()
+
+            # Train Discriminator
+            optimizer_D.zero_grad()
+            pred_real = discriminator(input_img, target_img)
+            pred_fake = discriminator(input_img, fake_output.detach())
+            loss_D_real = criterion_GAN(pred_real, real_labels)
+            loss_D_fake = criterion_GAN(pred_fake, fake_labels)
+            loss_D = (loss_D_real + loss_D_fake) * 0.5
+            loss_D.backward()
+            optimizer_D.step()
+
+        print(f"Epoch {epoch+1}/{num_epochs} - Loss_G: {loss_G.item():.4f}, Loss_D: {loss_D.item():.4f}")
+✅ Step 6: Run Everything
+python
+Copy
+Edit
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+generator = UNetGenerator().to(device)
+discriminator = PatchDiscriminator().to(device)
+
+dataset = PairedImageDataset("data/facades/train", transform)
+dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+
+train(generator, discriminator, dataloader, num_epochs=50, device=device)
